@@ -5,9 +5,10 @@
     },
     "id": "axiom.voicecontrol",
     "name": "Voice Control",
-    "version": "v1.0.1",
+    "version": "v1.0.2",
     "developer": "Axiom",
     "description": "jump with your voice. clap, yell, breathe too loud, whatever if its loud enough, you jump",
+    "tags": ["joke", "gameplay"],
     "settings": {
         "enabled": {
             "name": "Enabled",
