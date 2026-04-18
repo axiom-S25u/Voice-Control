@@ -1,12 +1,11 @@
 {
     "geode": "5.6.1",
     "gd": {
-        "win": "2.2081",
-		"mac": "2.2081"
+        "win": "2.2081"
     },
     "id": "axiom.voicecontrol",
     "name": "Voice Control",
-    "version": "v1.0.0",
+    "version": "v1.1.0",
     "developer": "Axiom",
     "description": "jump with your voice. clap, yell, breathe too loud, whatever if its loud enough, you jump",
     "settings": {
@@ -18,7 +17,7 @@
         },
         "threshold-db": {
             "name": "Trigger Threshold (dB)",
-            "description": "How loud your mic needs to be to trigger a click. Lower = more sensitive. - 30 is the best imo",
+            "description": "How loud your mic needs to be to trigger a click. Lower = more sensitive. -30 is the best imo",
             "type": "float",
             "default": -30.0,
             "min": -60.0,

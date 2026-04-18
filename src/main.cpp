@@ -12,18 +12,21 @@ using namespace geode::prelude;
 static std::atomic<bool> g_running(false);
 static std::atomic<bool> g_inLevel(false);
 static std::atomic<bool> g_pressing(false);
+static std::atomic<bool> g_threadReady(false);
 static std::thread g_micThread;
 static bool g_debug = false; // set to true if u need to see what the mic is picking up
 
 static FMOD::System* g_fmodSystem = nullptr;
 static FMOD::Sound* g_recordSound = nullptr;
 static int g_recordDevice = 0;
-static const int RECORD_LEN = 1024 * 16;
+static const int RECORD_LEN = 1024 * 2;
 
 // ok uhm i saw a lot of tiktoks of someone making an external program for this so i made it for geode .-. lol
 // axiom was here
 // mic detection is literally just comparing db levels, if peak is above threshold = jump. thats it
+
 static void press() {
+    if (!g_inLevel.load()) return;
     PlayLayer* pl = PlayLayer::get();
     if (!pl) return;
     if (!Mod::get()->getSettingValue<bool>("enabled")) return;
@@ -31,17 +34,14 @@ static void press() {
 }
 
 static void release() {
+    if (!g_inLevel.load()) return;
     PlayLayer* pl = PlayLayer::get();
     if (!pl) return;
     pl->handleButton(false, (int)PlayerButton::Jump, true);
 }
 
 static float get_threshold() {
-    double val = Mod::get()->getSettingValue<double>("threshold-db");
-    if (g_debug) {
-        // geode::log::info("threshold: {}", val);
-    }
-    return (float)val;
+    return (float)Mod::get()->getSettingValue<double>("threshold-db"); // user slider thing
 }
 
 static int find_mic_with_audio() {
@@ -49,7 +49,7 @@ static int find_mic_with_audio() {
     int numDevices = 0;
     int numConnected = 0;
     g_fmodSystem->getRecordNumDrivers(&numDevices, &numConnected);
-    
+
     for (int i = 0; i < numDevices; i++) {
         FMOD_CREATESOUNDEXINFO exparams;
         memset(&exparams, 0, sizeof(FMOD_CREATESOUNDEXINFO));
@@ -58,33 +58,30 @@ static int find_mic_with_audio() {
         exparams.format = FMOD_SOUND_FORMAT_PCM16;
         exparams.defaultfrequency = 44100;
         exparams.length = RECORD_LEN * sizeof(short);
-        
+
         FMOD::Sound* test_sound = nullptr;
         FMOD_RESULT res = g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &test_sound);
         if (res != FMOD_OK) continue;
-        
+
         res = g_fmodSystem->recordStart(i, test_sound, true);
         if (res != FMOD_OK) {
             test_sound->release();
             continue;
         }
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // this probably is the best way
-        
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100)); // yeah this is janky but works
+
         unsigned int curr;
         g_fmodSystem->getRecordPosition(i, &curr);
         g_fmodSystem->recordStop(i);
-        
+
         test_sound->release();
         if (curr > 0) {
-            if (g_debug) {
-                // geode::log::info("found active mic at device {}", i);
-            }
-            return i;
+            return i; // first mic that actually records something
         }
     }
-    
-    return 0;
+
+    return 0; // fallback
 }
 
 static void mic_thread_func() {
@@ -92,9 +89,6 @@ static void mic_thread_func() {
     g_fmodSystem->init(1, FMOD_INIT_NORMAL, nullptr);
 
     g_recordDevice = find_mic_with_audio();
-    if (g_debug) {
-        // geode::log::info("using recording device: {}", g_recordDevice);
-    }
 
     FMOD_CREATESOUNDEXINFO exparams;
     memset(&exparams, 0, sizeof(FMOD_CREATESOUNDEXINFO));
@@ -107,9 +101,16 @@ static void mic_thread_func() {
     g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &g_recordSound);
     g_fmodSystem->recordStart(g_recordDevice, g_recordSound, true);
 
+    g_threadReady.store(true);
+
     unsigned int pos = 0;
     bool was_above = false;
+    int release_counter = 0;
+    const int RELEASE_FRAMES = 1;
+
     while (g_running.load()) {
+        g_fmodSystem->update();
+
         unsigned int curr;
         g_fmodSystem->getRecordPosition(g_recordDevice, &curr);
 
@@ -123,13 +124,17 @@ static void mic_thread_func() {
             if (samples > 0) {
                 g_recordSound->lock(pos * sizeof(short), samples * sizeof(short), &p1, &p2, &l1, &l2);
 
+                float peak = 0.0f;
                 float sumsq = 0.0f;
                 int cnt = 0;
+
                 if (p1) {
                     short* buf = (short*)p1;
                     int n = l1 / sizeof(short);
                     for (int i = 0; i < n; i++) {
                         float s = buf[i] / 32768.0f;
+                        float abss = s < 0.0f ? -s : s;
+                        if (abss > peak) peak = abss;
                         sumsq += s * s;
                         cnt++;
                     }
@@ -139,6 +144,8 @@ static void mic_thread_func() {
                     int n = l2 / sizeof(short);
                     for (int i = 0; i < n; i++) {
                         float s = buf[i] / 32768.0f;
+                        float abss = s < 0.0f ? -s : s;
+                        if (abss > peak) peak = abss;
                         sumsq += s * s;
                         cnt++;
                     }
@@ -146,39 +153,73 @@ static void mic_thread_func() {
 
                 g_recordSound->unlock(p1, p2, l1, l2);
 
+                float peak_db = (peak <= 0.0f) ? -100.0f : 20.0f * log10f(peak);
                 float rms = (cnt > 0) ? sqrtf(sumsq / (float)cnt) : 0.0f;
-                float db = (rms <= 0.0f) ? -100.0f : 20.0f * log10f(rms);
+                float rms_db = (rms <= 0.0f) ? -100.0f : 20.0f * log10f(rms);
 
                 if (g_inLevel.load() && Mod::get()->getSettingValue<bool>("enabled")) {
                     float thresh = get_threshold();
-                    bool above = db >= thresh;
+                    float release_thresh = thresh - 12.0f;
 
-                    if (above && !was_above) {
+                    bool peak_above = peak_db >= thresh;
+                    bool rms_above = rms_db >= release_thresh;
+
+                    if (peak_above && !was_above) {
                         was_above = true;
+                        release_counter = 0;
                         g_pressing.store(true);
-                        Loader::get()->queueInMainThread([]() { press(); });
-                    } else if (!above && was_above) {
-                        was_above = false;
-                        g_pressing.store(false);
-                        Loader::get()->queueInMainThread([]() { release(); });
+                        Loader::get()->queueInMainThread([]() {
+                            if (g_inLevel.load()) press();
+                        });
+
+                    } else if (was_above && !peak_above && !rms_above) {
+                        release_counter++;
+                        if (release_counter >= RELEASE_FRAMES) {
+                            was_above = false;
+                            release_counter = 0;
+                            g_pressing.store(false);
+                            Loader::get()->queueInMainThread([]() {
+                                if (g_inLevel.load()) release();
+                            });
+                        }
+
+                    // still loud, keep holding
+                    } else if (peak_above && was_above) {
+                        release_counter = 0;
                     }
+                } else if (!g_inLevel.load() && was_above) {
+                    was_above = false;
+                    release_counter = 0;
+                    g_pressing.store(false);
                 }
             }
             pos = curr;
         }
-        // sleep so were not burning cpu. 2ms seems like a good balance, talking from experience
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1)); // dont fry cpu lol
     }
 
     g_fmodSystem->recordStop(g_recordDevice);
-    g_recordSound->release();
+    if (g_recordSound) {
+        g_recordSound->release();
+        g_recordSound = nullptr;
+    }
     g_fmodSystem->release();
+    g_fmodSystem = nullptr;
 }
 
 static void start_mic() {
     if (g_running.load()) return;
     g_running.store(true);
+    g_threadReady.store(false);
     g_micThread = std::thread(mic_thread_func);
+}
+
+static void do_release() {
+    if (g_pressing.load()) {
+        g_pressing.store(false);
+        release();
+    }
 }
 
 class $modify(PlayLayer) {
@@ -190,11 +231,18 @@ class $modify(PlayLayer) {
 
     void onExit() {
         g_inLevel.store(false);
-        if (g_pressing.load()) {
-            g_pressing.store(false);
-            release();
-        }
+        g_pressing.store(false);
         PlayLayer::onExit();
+    }
+
+    void resetLevel() {
+        do_release();
+        PlayLayer::resetLevel();
+    }
+
+    void destroyPlayer(PlayerObject* player, GameObject* object) {
+        do_release();
+        PlayLayer::destroyPlayer(player, object);
     }
 };
 
