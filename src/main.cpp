@@ -42,7 +42,7 @@ static void release() {
 
 static float get_threshold() {
     return (float)Mod::get()->getSettingValue<double>("threshold-db");
-
+}
 static int find_mic_with_audio() {
     // fmod is stupid so we gotta do this manually
     int numDevices = 0;
