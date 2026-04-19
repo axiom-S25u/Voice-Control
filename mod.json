@@ -30,5 +30,9 @@
                 "input": true
             }
         }
+    },
+    "links": {
+        "github": "https://github.com/axiom-S25u/Voice-Control",
+        "community": "https://discord.gg/TWn99qzmUA"
     }
 }
