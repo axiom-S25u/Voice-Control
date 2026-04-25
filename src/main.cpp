@@ -117,37 +117,6 @@ static int find_mic_with_audio() {
     return 0;// fallbackkkkkkkkkkkkkkkkkkk
 }
 
-static bool open_record_sound(int device) {
-    FMOD_CREATESOUNDEXINFO ex;
-    memset(&ex, 0, sizeof(ex));
-    ex.cbsize = sizeof(ex);
-    ex.numchannels = 1; // mono only, stereo was overkill
-    ex.format = FMOD_SOUND_FORMAT_PCM16;
-    ex.defaultfrequency = 44100; // tried 48k, didnt matter
-    ex.length = RECORD_LEN * sizeof(short);
-
-    if (g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &ex, &g_recordSound) != FMOD_OK)
-        return false;
-
-    if (g_fmodSystem->recordStart(device, g_recordSound, true) != FMOD_OK) {
-        g_recordSound->release();
-        g_recordSound = nullptr;
-        return false;
-    }
-
-    g_recordDevice = device;
-    g_activeDevice.store(device);
-    return true;
-}
-
-static void close_record_sound() {
-    if (g_recordSound) {
-        g_fmodSystem->recordStop(g_recordDevice);
-        g_recordSound->release();
-        g_recordSound = nullptr;
-    }
-}
-
 static void mic_thread_func() {
     FMOD::System_Create(&g_fmodSystem);
     g_fmodSystem->init(1, FMOD_INIT_NORMAL, nullptr);
@@ -457,7 +426,7 @@ public:
         return nullptr;
     }
 };
-
+// simplest ui but we ball
 class $modify(PlayLayer) {
     void resetLevel() {
         g_wasAbove.store(false);
