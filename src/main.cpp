@@ -382,13 +382,13 @@ public:
             if (bs) bs->setString((kv.first == idx) ? "Selected" : "Select");
         }
     }
-
-    void tick(float) {
+// here undefined0 or whoever is reviewing
+    void tick(float dt) {
         int active = g_activeDevice.load();
         int sel    = g_selectedDevice.load();
         float peak = g_currentPeak.load();
 
-        m_blinkPhase += 0.04f;
+        m_blinkPhase += dt;
         bool blinkOn  = (fmodf(m_blinkPhase, 0.6f) < 0.3f);
         bool hasAudio = peak > 0.02f;
 
