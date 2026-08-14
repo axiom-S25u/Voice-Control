@@ -7,19 +7,19 @@ else()
     set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64")
 endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-
 project(VoiceControl VERSION 1.0.0 LANGUAGES CXX)
-
+if (ANDROID)
+    add_compile_definitions(VOICE_CONTROL_ANDROID)
+elseif ("${CMAKE_SYSTEM_NAME}" STREQUAL "iOS" OR IOS)
+    add_compile_definitions(VOICE_CONTROL_IOS)
+endif()
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS src/*.cpp)
-
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
-
 if (NOT DEFINED ENV{GEODE_SDK})
     message(FATAL_ERROR "Unable to find Geode SDK! Please define GEODE_SDK environment variable to point to Geode")
 else()
     message(STATUS "Found Geode: $ENV{GEODE_SDK}")
 endif()
-
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
-
+set_target_properties(asp PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON)
 setup_geode_mod(${PROJECT_NAME})
