@@ -3,6 +3,11 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/utils/permission.hpp>
+#include <Geode/binding/FMODAudioEngine.hpp>
+#ifdef GEODE_IS_ANDROID
+#include <Geode/cocos/platform/android/jni/JniHelper.h>
+#endif
+#include <fmod.hpp>
 #include <fmod.hpp>
 #include <thread>
 #include <atomic>
@@ -99,7 +104,7 @@ static int find_mic_with_audio() {
         ex.length = RECORD_LEN * sizeof(short);
 
         FMOD::Sound* test = nullptr;
-        if (g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &ex, &test) != FMOD_OK)
+        if (g_fmodSystem->createSound(nullptr, FMOD_CREATESAMPLE | FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &ex, &test) != FMOD_OK)
             continue;
         if (g_fmodSystem->recordStart(i, test, true) != FMOD_OK) {
             test->release();
@@ -119,8 +124,25 @@ static int find_mic_with_audio() {
 }
 
 static void mic_thread_func() {
+#if defined(GEODE_IS_ANDROID)
+    JavaVM* vm = JniHelper::getJavaVM();
+    JNIEnv* env = nullptr;
+    if (vm) vm->AttachCurrentThread(&env, nullptr);
+
+    g_fmodSystem = FMODAudioEngine::get()->m_system;
+#else
     FMOD::System_Create(&g_fmodSystem);
     g_fmodSystem->init(1, FMOD_INIT_NORMAL, nullptr);
+#endif
+
+    if (!g_fmodSystem) {
+        log::error("fmod system is null");
+        g_running.store(false);
+#if defined(GEODE_IS_ANDROID)
+        if (vm) vm->DetachCurrentThread();
+#endif
+        return;
+    }
 
     int saved = Mod::get()->getSavedValue<int>("selected-device", -1);
     g_selectedDevice.store(saved);
@@ -139,10 +161,27 @@ static void mic_thread_func() {
     exparams.defaultfrequency = 44100; // tried 48k, didnt matter
     exparams.length = RECORD_LEN * sizeof(short);
 
-    g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &g_recordSound);
-    g_fmodSystem->recordStart(g_recordDevice, g_recordSound, true);
-    g_activeDevice.store(g_recordDevice);
+    if (g_fmodSystem->createSound(nullptr, FMOD_CREATESAMPLE | FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &g_recordSound) != FMOD_OK || !g_recordSound) {
+        log::error("fmod createSound failed");
+        g_running.store(false);
+#if defined(GEODE_IS_ANDROID)
+        if (vm) vm->DetachCurrentThread();
+#endif
+        return;
+    }
 
+    if (g_fmodSystem->recordStart(g_recordDevice, g_recordSound, true) != FMOD_OK) {
+        log::error("fmod recordStart failed on device {}", g_recordDevice);
+        g_recordSound->release();
+        g_recordSound = nullptr;
+        g_running.store(false);
+#if defined(GEODE_IS_ANDROID)
+        if (vm) vm->DetachCurrentThread();
+#endif
+        return;
+    }
+
+    g_activeDevice.store(g_recordDevice);
     g_threadReady.store(true);
 
     unsigned int pos = 0;
@@ -150,7 +189,9 @@ static void mic_thread_func() {
     const int RELEASE_FRAMES = 1;
 
     while (g_running.load()) {
+#if !defined(GEODE_IS_ANDROID)
         g_fmodSystem->update();
+#endif
 
         if (g_restartRequested.exchange(false)) {
             g_fmodSystem->recordStop(g_recordDevice);
@@ -170,7 +211,7 @@ static void mic_thread_func() {
             exparams.defaultfrequency = 44100;
             exparams.length = RECORD_LEN * sizeof(short);
 
-            g_fmodSystem->createSound(nullptr, FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &g_recordSound);
+            g_fmodSystem->createSound(nullptr, FMOD_CREATESAMPLE | FMOD_2D | FMOD_OPENUSER | FMOD_LOOP_NORMAL, &exparams, &g_recordSound);
             g_fmodSystem->recordStart(g_recordDevice, g_recordSound, true);
             g_activeDevice.store(g_recordDevice);
             pos = 0;
@@ -253,7 +294,6 @@ static void mic_thread_func() {
                             pl->handleButton(false, (int)PlayerButton::Jump, true);
                     });
                 }
-
             } else if (peak_above && was_above) {
                 release_counter = 0;
             }
@@ -269,8 +309,14 @@ static void mic_thread_func() {
         g_recordSound->release();
         g_recordSound = nullptr;
     }
+#if !defined(GEODE_IS_ANDROID)
     g_fmodSystem->release();
+#endif
     g_fmodSystem = nullptr;
+
+#if defined(GEODE_IS_ANDROID)
+    if (vm) vm->DetachCurrentThread();
+#endif
 }
 
 static void start_mic() {
@@ -297,6 +343,7 @@ static void ask_for_mic() {
     start_mic();
 #endif
 }
+
 // reason is people cant fucking set their default mic to wtw they are using and etc
 class MicSelectPopup : public Popup {
 public:
@@ -401,7 +448,8 @@ public:
             if (bs) bs->setString((kv.first == idx) ? "Selected" : "Select");
         }
     }
-// here undefined0 or whoever is reviewing
+
+    // here undefined0 or whoever is reviewing
     void tick(float dt) {
         int active = g_activeDevice.load();
         int sel    = g_selectedDevice.load();
@@ -445,6 +493,7 @@ public:
         return nullptr;
     }
 };
+
 // simplest ui but we ball
 class $modify(PlayLayer) {
     void resetLevel() {
