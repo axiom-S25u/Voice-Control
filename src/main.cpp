@@ -2,6 +2,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/ui/Popup.hpp>
+#include <Geode/utils/permission.hpp>
 #include <fmod.hpp>
 #include <thread>
 #include <atomic>
@@ -278,6 +279,24 @@ static void start_mic() {
     g_threadReady.store(false);
     g_micThread = std::thread(mic_thread_func);
 }
+
+static void ask_for_mic() {
+#if defined(GEODE_IS_ANDROID) || defined(GEODE_IS_IOS)
+    if (geode::utils::permission::getPermissionStatus(geode::utils::permission::Permission::RecordAudio)) {
+        start_mic();
+        return;
+    }
+
+    geode::utils::permission::requestPermission(
+        geode::utils::permission::Permission::RecordAudio,
+        [](bool granted) {
+            if (granted) start_mic();
+        }
+    );
+#else
+    start_mic();
+#endif
+}
 // reason is people cant fucking set their default mic to wtw they are using and etc
 class MicSelectPopup : public Popup {
 public:
@@ -463,5 +482,5 @@ class $modify(VCPauseLayer, PauseLayer) {
 };
 
 $execute {
-    start_mic();
+    ask_for_mic();
 }
