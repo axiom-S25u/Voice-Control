@@ -128,7 +128,9 @@ static void mic_thread_func() {
     JavaVM* vm = JniHelper::getJavaVM();
     JNIEnv* env = nullptr;
     if (vm) vm->AttachCurrentThread(&env, nullptr);
+#endif
 
+#if defined(GEODE_IS_ANDROID) || defined(GEODE_IS_IOS)
     g_fmodSystem = FMODAudioEngine::get()->m_system;
 #else
     FMOD::System_Create(&g_fmodSystem);
@@ -189,7 +191,7 @@ static void mic_thread_func() {
     const int RELEASE_FRAMES = 1;
 
     while (g_running.load()) {
-#if !defined(GEODE_IS_ANDROID)
+#if !defined(GEODE_IS_ANDROID) && !defined(GEODE_IS_IOS)
         g_fmodSystem->update();
 #endif
 
@@ -309,7 +311,7 @@ static void mic_thread_func() {
         g_recordSound->release();
         g_recordSound = nullptr;
     }
-#if !defined(GEODE_IS_ANDROID)
+#if !defined(GEODE_IS_ANDROID) && !defined(GEODE_IS_IOS)
     g_fmodSystem->release();
 #endif
     g_fmodSystem = nullptr;
