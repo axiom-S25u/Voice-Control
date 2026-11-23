@@ -513,8 +513,8 @@ class $modify(VCPauseLayer, PauseLayer) {
     void customSetup() {
         PauseLayer::customSetup();
 
-        auto menu = getChildByID("right-button-menu");
-        if (!menu) menu = getChildByID("left-button-menu");
+        auto menu = getChildByIDRecursive("right-button-menu");
+        if (!menu) menu = getChildByIDRecursive("left-button-menu");
         if (!menu) return;
 
         CCSprite* spr = CCSprite::create("logo.png"_spr);
