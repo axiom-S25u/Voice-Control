@@ -321,8 +321,21 @@ static void mic_thread_func() {
 #endif
 }
 
+static void stop_mic() {
+    g_running.store(false);
+    if (g_micThread.joinable()) g_micThread.join();
+    g_threadReady.store(false);
+}
+
+struct MicThreadCleanup {
+    ~MicThreadCleanup() { stop_mic(); }
+};
+
+static MicThreadCleanup g_micThreadCleanup;
+
 static void start_mic() {
     if (g_running.load()) return;
+    if (g_micThread.joinable()) g_micThread.join();
     g_running.store(true);
     g_threadReady.store(false);
     g_micThread = std::thread(mic_thread_func);
